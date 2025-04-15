@@ -14,6 +14,7 @@ from telethon.errors import (
 from telethon.tl.custom import Message
 from utils.logger import logger
 from utils.redis_config import redis_manager
+from functools import wraps
 
 # Constants
 REDIS_MESSAGE_EXPIRY = 48 * 60 * 60  # 48 hours in seconds
@@ -58,6 +59,31 @@ class MessageTracker:
             metadata=data.get('metadata', {})
         )
 
+def with_cleanup(func: Callable) -> Callable:
+    @wraps(func)
+    async def wrapper(message: Message, *args: Any, **kwargs: Any) -> Any:
+        if not hasattr(message, 'from_user') or not message.from_user:
+            return await func(message, *args, **kwargs)
+            
+        user_id = message.from_user.id
+        cleaner = ChatCleaner()
+        
+        try:
+            # Load and clean old messages before handling new command
+            await cleaner.clean_chat(user_id)
+            result = await func(message, *args, **kwargs)
+            
+            # Track the new message for future cleanup
+            if isinstance(result, Message):
+                await cleaner.track_message(result, MessageContext.MENU)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in cleanup wrapper: {str(e)}")
+            return await func(message, *args, **kwargs)
+            
+    return wrapper
+
 class ChatCleaner:
     def __init__(self, debug_mode: bool = False):
         # Core state tracking
@@ -84,6 +110,20 @@ class ChatCleaner:
         
         # Optional callback for persistent storage
         self._persistence_callback: Optional[Callable[[int, Dict[int, MessageTracker]], Awaitable[None]]] = None
+        
+        self._check_redis_persistence()
+
+    async def _check_redis_persistence(self) -> None:
+        """Check if Redis is configured for persistence"""
+        if not redis_manager.enabled:
+            return
+            
+        try:
+            info = await redis_manager.redis.info()
+            if info.get("persistence", {}).get("loading") == 0:
+                logger.warning("Redis persistence may not be configured - tracked messages could be lost on restart")
+        except Exception as e:
+            logger.error(f"Failed to check Redis persistence: {str(e)}")
 
     def _get_redis_key(self, user_id: int) -> str:
         """Get Redis key for user's tracked messages"""
@@ -155,8 +195,14 @@ class ChatCleaner:
             
         logger.info("Chat cleaner service shutdown complete")
 
-    async def track_message(self, message: Message, user_id: int, context: MessageContext = MessageContext.MENU, metadata: Dict[str, Any] = None) -> None:
-        """Track a new message for cleanup"""
+    async def track_message(
+        self, 
+        user_id: int, 
+        message: Message, 
+        context: MessageContext,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Track a new message with its context"""
         try:
             async with self._state_lock:
                 # Load existing messages from Redis if this is first message for user
@@ -166,7 +212,8 @@ class ChatCleaner:
                 # Initialize user tracking if needed
                 if user_id not in self._messages:
                     self._messages[user_id] = {}
-                    
+                    self._last_activity[user_id] = datetime.now(timezone.utc).timestamp()
+
                 # Create message tracker
                 tracker = MessageTracker(
                     message_id=message.id,
@@ -176,93 +223,46 @@ class ChatCleaner:
                     metadata=metadata or {}
                 )
                 
-                # Store tracker
+                # Update tracking
                 self._messages[user_id][message.id] = tracker
-                logger.debug(f"Tracked message {message.id} for user {user_id} with context {context.name}")
+                self._last_activity[user_id] = tracker.timestamp
+
+                # Handle special contexts
+                if context == MessageContext.MENU:
+                    old_menu = self._current_menu.get(user_id)
+                    self._current_menu[user_id] = message.id
+                    if old_menu:
+                        # Clean previous menu asynchronously
+                        asyncio.create_task(self.clean_messages(
+                            message.client, 
+                            user_id,
+                            message.chat_id,
+                            context_filter={MessageContext.MENU}
+                        ))
                 
-                # Update last activity
-                self._last_activity[user_id] = datetime.now(timezone.utc)
-                
+                elif context == MessageContext.COMMAND:
+                    # Schedule command message for deletion after short delay
+                    asyncio.create_task(self._delayed_command_cleanup(
+                        message.client,
+                        user_id,
+                        message.chat_id,
+                        message.id
+                    ))
+
+                # Enforce message limit per user
+                if len(self._messages[user_id]) > self.MAX_TRACKED_MESSAGES:
+                    await self._prune_old_messages(user_id)
+
                 # Save to Redis
                 if redis_manager.enabled:
                     await self._save_to_redis(user_id)
-                    
-        except Exception as e:
-            logger.error(f"Error tracking message {message.id} for user {user_id}: {str(e)}")
 
-    async def clean_chat(self, user_id: int, context: Optional[MessageContext] = None, message_ids: Optional[List[int]] = None) -> None:
-        """Clean messages based on context or specific IDs"""
-        try:
-            # Load messages from Redis if not in memory
-            if user_id not in self._messages and redis_manager.enabled:
-                await self._load_from_redis(user_id)
-                
-            # Try to acquire cleanup lock with timeout
-            lock = self._cleanup_locks.setdefault(user_id, asyncio.Lock())
-            
-            try:
-                async with asyncio.timeout(self.LOCK_TIMEOUT):
-                    async with lock:
-                        logger.debug(f"Starting cleanup for user {user_id}" + 
-                                   (f" with context {context.name}" if context else "") +
-                                   (f" for {len(message_ids)} specific messages" if message_ids else ""))
-                        
-                        # Get messages to delete
-                        to_delete = []
-                        if message_ids:
-                            to_delete = [msg_id for msg_id in message_ids if msg_id in self._messages.get(user_id, {})]
-                        elif context:
-                            to_delete = [
-                                msg_id for msg_id, tracker in self._messages.get(user_id, {}).items()
-                                if tracker.context == context
-                            ]
-                        else:
-                            # Delete all tracked messages except current menu
-                            current_menu = self._current_menu.get(user_id)
-                            to_delete = [
-                                msg_id for msg_id in self._messages.get(user_id, {}).keys()
-                                if msg_id != current_menu
-                            ]
-                            
-                        if not to_delete:
-                            logger.debug(f"No messages to clean for user {user_id}")
-                            return
-                            
-                        logger.debug(f"Found {len(to_delete)} messages to clean for user {user_id}")
-                        
-                        # Delete in batches
-                        for batch in [to_delete[i:i + self.DELETION_BATCH_SIZE] for i in range(0, len(to_delete), self.DELETION_BATCH_SIZE)]:
-                            try:
-                                await self._client.delete_messages(user_id, batch)
-                                logger.debug(f"Deleted batch of {len(batch)} messages for user {user_id}")
-                                
-                                # Update tracking
-                                for msg_id in batch:
-                                    if user_id in self._messages and msg_id in self._messages[user_id]:
-                                        del self._messages[user_id][msg_id]
-                                        
-                                # Update Redis after batch deletion
-                                if redis_manager.enabled:
-                                    await self._save_to_redis(user_id)
-                                    
-                            except MessageDeleteForbiddenError:
-                                logger.warning(f"Delete forbidden for some messages in user {user_id}")
-                            except Exception as e:
-                                logger.error(f"Error deleting message batch for user {user_id}: {str(e)}")
-                                
-            except asyncio.TimeoutError:
-                logger.warning(f"Cleanup timeout for user {user_id}")
-                
+                # Persist state if callback is set
+                if self._persistence_callback:
+                    await self._persistence_callback(user_id, self._messages[user_id])
+
         except Exception as e:
-            logger.error(f"Error in clean_chat for user {user_id}: {str(e)}")
-            
-        finally:
-            # Always try to save state to Redis even if there were errors
-            if redis_manager.enabled:
-                try:
-                    await self._save_to_redis(user_id)
-                except Exception as e:
-                    logger.error(f"Error saving to Redis after cleanup for user {user_id}: {str(e)}")
+            logger.error(f"Error tracking message for user {user_id}: {str(e)}", exc_info=True)
 
     async def _delayed_command_cleanup(
         self,
@@ -286,9 +286,9 @@ class ChatCleaner:
         client: TelegramClient,
         user_id: int,
         chat_id: int,
-        context_filter: Optional[Set[MessageContext]],
-        message_ids: Optional[Set[int]],
-        exclude_current_menu: bool
+        context_filter: Optional[Set[MessageContext]] = None,
+        message_ids: Optional[Set[int]] = None,
+        exclude_current_menu: bool = True
     ) -> None:
         """Clean messages based on context or specific IDs"""
         try:

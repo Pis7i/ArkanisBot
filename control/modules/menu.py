@@ -3,8 +3,9 @@ from utils.logger import logger
 from datetime import datetime
 import asyncio
 from utils.error_handler import error_handler
-from utils.chat_cleaner import chat_cleaner, MessageContext
+from utils.chat_cleaner import chat_cleaner, MessageContext, with_cleanup
 
+@with_cleanup
 async def send_menu_message(event, text, buttons=None, parse_mode='markdown'):
     """Helper function to send menu messages and track them."""
     try:
@@ -50,6 +51,7 @@ async def clear_chat(event, user_id):
         # Don't raise the exception - let the menu continue to show
 
 @error_handler
+@with_cleanup
 async def show_main_menu(event, user_id):
     """Show main menu with user information and options"""
     try:
@@ -135,6 +137,7 @@ async def show_main_menu(event, user_id):
         )
 
 @error_handler
+@with_cleanup
 async def show_forwarding_menu(event, user_id):
     """Show the main forwarding menu"""
     logger.info(f"Opening forwarding menu for user {user_id}")
@@ -163,6 +166,7 @@ async def show_forwarding_menu(event, user_id):
         await event.answer("❌ Failed to show forwarding menu", alert=True)
 
 @error_handler
+@with_cleanup
 async def show_autoforward_menu(event, user_id):
     """Show the autoforward submenu"""
     logger.info(f"Opening autoforward menu for user {user_id}")
@@ -240,6 +244,8 @@ async def show_autoforward_menu(event, user_id):
             buttons=[[Button.inline("🔙 Back", "forwarding")]]
         )
 
+@error_handler
+@with_cleanup
 async def show_autoforward_setup_menu(event, user_id):
     """Show the autoforward setup submenu"""
     logger.info(f"Opening autoforward setup menu for user {user_id}")
@@ -282,6 +288,8 @@ async def handle_single_forward(event):
     """Handle single forward button press"""
     await event.answer("⚠️ Single Forward feature is not ready yet", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_account_menu(event, user_id):
     """Show account menu with user information options"""
     try:
@@ -307,6 +315,8 @@ async def show_account_menu(event, user_id):
         logger.error(f"Error showing account menu: {str(e)}")
         await event.answer("❌ Failed to show account menu", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_groups_menu(event, user_id):
     """Handle group management"""
     logger.info(f"Opening group management for user {user_id}")
@@ -332,6 +342,8 @@ async def show_groups_menu(event, user_id):
         logger.error(f"Error showing groups menu to user {user_id}: {str(e)}")
         await event.answer("❌ Failed to show groups menu", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_tools_menu(event, user_id):
     """Show tools menu with available tools"""
     try:
@@ -355,6 +367,8 @@ async def show_tools_menu(event, user_id):
         logger.error(f"Error showing tools menu: {str(e)}")
         await event.answer("❌ Failed to show tools menu", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_saved_messages(event, user_id, page=0):
     """Show saved messages for selection"""
     logger.info(f"Showing saved messages for user {user_id}")
@@ -427,6 +441,8 @@ async def show_saved_messages(event, user_id, page=0):
         logger.error(f"Error showing saved messages for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ Failed to show saved messages. Please try logging out and back in.", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_message_preview(event, user_id, message_id):
     """Show preview of selected message with confirmation options"""
     logger.info(f"Showing message preview for user {user_id}, message {message_id}")
@@ -511,6 +527,8 @@ def get_media_type(message):
     else:
         return "Unknown Media 📎"
 
+@error_handler
+@with_cleanup
 async def show_delay_config(event, user_id, is_test_delay=False):
     """Show delay configuration menu"""
     logger.info(f"Showing {'test ' if is_test_delay else ''}delay config for user {user_id}")
@@ -547,6 +565,8 @@ async def show_delay_config(event, user_id, is_test_delay=False):
         logger.error(f"Error showing delay config for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ Failed to show delay configuration", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_custom_delay_input(event, user_id, is_test_delay=False):
     """Show custom delay input menu"""
     logger.info(f"Showing custom delay input menu for user {user_id}")
@@ -625,6 +645,8 @@ async def handle_delay_input(event, user_id, delay_text, is_test_delay=False):
             buttons=[[Button.inline("🔙 Back", f"setup_{'test_' if is_test_delay else ''}delay")]]
         )
 
+@error_handler
+@with_cleanup
 async def show_group_selection(event, user_id, page=0):
     """Show group selection menu"""
     logger.info(f"Showing group selection for user {user_id}")
@@ -694,6 +716,8 @@ async def show_group_selection(event, user_id, page=0):
         logger.error(f"Error showing group selection for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ Failed to show group selection", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_group_preview(event, user_id, group_id):
     """Show group preview with confirmation options"""
     logger.info(f"Showing group preview for user {user_id}, group {group_id}")
@@ -730,6 +754,8 @@ async def show_group_preview(event, user_id, group_id):
         logger.error(f"Error showing group preview for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ Failed to show group preview", alert=True)
 
+@error_handler
+@with_cleanup
 async def show_forwarding_status(event, user_id):
     """Show autoforward status and statistics"""
     logger.info(f"Showing forwarding status for user {user_id}")
