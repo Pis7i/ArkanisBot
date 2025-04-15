@@ -2,6 +2,8 @@ from redis.asyncio import Redis, ConnectionPool
 from typing import Optional
 import json
 from utils.logger import logger
+import os
+import aioredis
 
 class RedisManager:
     def __init__(self):
@@ -9,25 +11,33 @@ class RedisManager:
         self._redis: Optional[Redis] = None
         self._enabled = False
     
-    async def init(self, host: str = 'localhost', port: int = 6379, db: int = 0, enabled: bool = True):
-        """Initialize Redis connection pool"""
-        self._enabled = enabled
-        if not self._enabled:
-            logger.info("Redis is disabled, skipping initialization")
-            return
-        
+    async def init(self):
+        """Initialize Redis connection"""
         try:
-            self._pool = ConnectionPool(
-                host=host,
-                port=port,
-                db=db,
+            if not os.getenv('REDIS_ENABLED', 'false').lower() == 'true':
+                logger.info("Redis is disabled by configuration")
+                return
+
+            host = os.getenv('REDIS_HOST', 'localhost')
+            port = int(os.getenv('REDIS_PORT', 6379))
+            db = int(os.getenv('REDIS_DB', 0))
+            
+            self._redis = aioredis.from_url(
+                f"redis://{host}:{port}/{db}",
+                encoding="utf-8",
                 decode_responses=True
             )
-            self._redis = Redis(connection_pool=self._pool)
             
-            # Test connection
-            await self.health_check()
-            logger.info("Redis connection initialized successfully")
+            # Test connection and check persistence
+            info = await self._redis.info()
+            if info.get("persistence", {}).get("loading") == 0:
+                logger.warning("Redis appears to be running without persistence! Old messages may not be cleaned after restart.")
+            if not info.get("persistence", {}).get("rdb_last_save_time"):
+                logger.warning("No recent RDB saves detected. Redis persistence may not be properly configured.")
+                
+            self._enabled = True
+            logger.info(f"Redis connection established to {host}:{port} db={db}")
+            
         except Exception as e:
             logger.error(f"Failed to initialize Redis: {str(e)}")
             self._enabled = False

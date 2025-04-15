@@ -134,13 +134,10 @@ class ControlBot:
             # Track command messages
             if message.text and message.text.startswith('/'):
                 await chat_cleaner.track_message(
-                    user_id,
                     message,
+                    user_id,
                     MessageContext.COMMAND
                 )
-
-            # Clean chat if needed
-            await self._ensure_clean_chat(event)
 
             # Check if user is in setup state
             if user_id in self.user_instances and hasattr(self.user_instances[user_id], 'state'):
@@ -149,10 +146,11 @@ class ControlBot:
                     try:
                         delay = int(message.message.strip())
                         if delay < 8:
-                            await event.respond(
+                            msg = await event.respond(
                                 "⚠️ Minimum delay is 8 minutes. Please enter a larger value:",
                                 buttons=[[Button.inline("🔙 Back", "autoforward_setup_menu")]]
                             )
+                            await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
                             return
                         
                         # Save the delay
@@ -167,16 +165,18 @@ class ControlBot:
                         self._save_instances()
                         
                         # Show confirmation and return to setup menu
-                        await event.respond(
+                        msg = await event.respond(
                             f"✅ {'Test delay' if key == 'test_delay' else 'Delay'} set to {delay} minutes.",
                             buttons=[[Button.inline("🔙 Back to Setup", "autoforward_setup_menu")]]
                         )
+                        await chat_cleaner.track_message(msg, user_id, MessageContext.MENU)
                         return
                     except ValueError:
-                        await event.respond(
+                        msg = await event.respond(
                             "⚠️ Please enter a valid number:",
                             buttons=[[Button.inline("🔙 Back", "autoforward_setup_menu")]]
                         )
+                        await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
                         return
             
             # Check if user is in auth state
@@ -197,111 +197,36 @@ class ControlBot:
                     await handle_logout_command(event, self)
                 else:
                     logger.warning(f"Unknown command from user {user_id}: {command}")
-                    await event.respond("⚠️ Unknown command. Use /help to see available commands.")
-                return
+                    msg = await event.respond("⚠️ Unknown command. Use /help to see available commands.")
+                    await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
             
-            # Ensure user is authenticated for non-command messages
-            if not await self._ensure_authenticated(event):
-                return
-            
-            # Handle normal messages
-            instance = self.user_instances[user_id]
-            if instance.setup_state:
-                # Handle setup steps
-                if instance.setup_state.get('step') == 'select_source':
-                    if message.forward:
-                        # Handle source chat selection
-                        source_chat_id = message.forward.chat_id
-                        instance.setup_state['config']['source_chat_id'] = source_chat_id
-                        instance.setup_state['step'] = 'select_message'
-                        await event.respond(
-                            "✅ Source chat selected!\n\n"
-                            "Now, forward the message you want to monitor.\n"
-                            "This will be used as a template for forwarding."
-                        )
-                    else:
-                        await event.respond("⚠️ Please forward a message from the source chat.")
-                
-                elif instance.setup_state.get('step') == 'select_message':
-                    if message.forward:
-                        # Handle message selection
-                        instance.setup_state['config']['message_id'] = message.forward.message_id
-                        instance.setup_state['step'] = 'set_delay'
-                        await event.respond(
-                            "⏱ Please set the delay between forwards (in minutes).\n"
-                            "Minimum delay is 8 minutes."
-                        )
-                    else:
-                        await event.respond("⚠️ Please forward a message to use as template.")
-                
-                elif instance.setup_state.get('step') == 'set_delay':
-                    try:
-                        delay = int(message.message.strip())
-                        if delay < 8:
-                            await event.respond("⚠️ Minimum delay is 8 minutes. Please enter a larger value.")
-                            return
-                        
-                        # Save configuration
-                        config = instance.setup_state['config']
-                        config['delay'] = delay
-                        instance.autoforward_config = config
-                        instance.setup_state = None
-                        self._save_instances()
-                        
-                        await event.respond(
-                            "✅ Autoforward configured successfully!\n\n"
-                            f"Source Chat: `{config['source_chat_id']}`\n"
-                            f"Message ID: `{config['message_id']}`\n"
-                            f"Delay: {delay} minutes"
-                        )
-                    except ValueError:
-                        await event.respond("⚠️ Please enter a valid number for the delay.")
-            
-            else:
-                # Handle normal messages (not in setup)
-                await event.respond("Send /help to see available commands.")
-        
         except Exception as e:
-            logger.error(f"Error handling message from user {user_id}: {str(e)}", exc_info=True)
-            await event.respond("❌ An error occurred processing your message. Please try again.")
+            logger.error(f"Error handling message: {str(e)}", exc_info=True)
+            msg = await event.respond("❌ An error occurred. Please try again.")
+            await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
     
     async def start(self):
         """Start the bot"""
         try:
-            # Start chat cleaner
-            await chat_cleaner.start()
-            
-            # Create the client
-            self.client = TelegramClient('bot', self.api_id, self.api_hash)
-            
-            # Set bot instance on client
-            self.client._bot_instance = self
-            
-            # Start the client
+            # Initialize the client
+            self.client = TelegramClient('controlbot', self.api_id, self.api_hash)
             await self.client.start(bot_token=self.bot_token)
             
             # Register message handler
-            self.client.add_event_handler(
-                self._handle_message,
-                events.NewMessage()
-            )
+            @self.client.on(events.NewMessage())
+            async def message_wrapper(event):
+                await self._handle_message(event)
             
-            # Register callback handler with bot instance and chat cleaning
+            # Register callback handler
             @self.client.on(events.CallbackQuery())
             async def callback_wrapper(event):
-                # Clean chat if needed
-                await self._ensure_clean_chat(event)
-                # Handle the callback
                 await handle_callback_query(event, self)
-            
-            # Initialize gateway auth
-            await ensure_gateway_auth_initialized()
             
             logger.info("Bot started successfully")
             
-            # Run until disconnected
+            # Keep the bot running
             await self.client.run_until_disconnected()
-        
+            
         except Exception as e:
             logger.error(f"Error starting bot: {str(e)}", exc_info=True)
             raise

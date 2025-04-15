@@ -21,173 +21,123 @@ from control.modules.menu import (
 )
 from control.modules.autoforward import start_autoforward, start_test_forward, stop_autoforward
 import asyncio
+from telethon import events
+from utils.chat_cleaner import chat_cleaner, MessageContext
+from utils.decorators import with_cleanup
 
-@error_handler
-async def handle_callback_query(event, bot_instance):
+@with_cleanup
+async def handle_callback_query(event, bot):
     """Handle callback queries from inline buttons"""
+    user_id = event.sender_id
+    data = event.data.decode()
+    
+    if not await bot._ensure_authenticated(event):
+        return
+        
+    logger.info(f"Callback from user {user_id}: {data}")
+    
     try:
-        # Get the callback data
-        data = event.data.decode()
-        user_id = event.sender_id
-        
-        # First, answer the callback query to acknowledge it
-        try:
-            await event.answer()
-        except Exception as e:
-            logger.warning(f"Could not answer callback query: {str(e)}")
-        
-        # Get user instance
-        instance = bot_instance.user_instances.get(user_id)
-        if not instance:
-            logger.error(f"No instance found for user {user_id}")
-            await event.respond("❌ Session error. Please use /start to reconnect.")
-            return
-            
-        # Check client connection if needed
-        if data not in ["refresh", "logout", "main"]:  # These actions don't require client
-            if not instance.client or not instance.client.is_connected():
-                try:
-                    logger.info(f"Reconnecting client for user {user_id}")
-                    await instance.init_client(bot_instance.api_id)
-                    if not instance.client.is_connected():
-                        await event.respond(
-                            "❌ Connection lost. Please use /start to reconnect.",
-                            parse_mode='markdown'
-                        )
-                        return
-                    logger.info(f"Successfully reconnected client for user {user_id}")
-                except Exception as e:
-                    logger.error(f"Failed to reconnect client for user {user_id}: {str(e)}")
-                    await event.respond(
-                        "❌ Failed to reconnect. Please use /start to reconnect.",
-                        parse_mode='markdown'
-                    )
-                    return
-            
-        # Handle different callback types
-        if data == "forwarding":
-            await show_forwarding_menu(event, user_id)
-            
-        elif data == "autoforward_menu":
-            await show_autoforward_menu(event, user_id)
-            
-        elif data == "autoforward_setup_menu":
-            await show_autoforward_setup_menu(event, user_id)
-            
-        elif data == "bypass_groups_menu":
-            from control.modules.autoforward import handle_bypass_groups_menu
-            await handle_bypass_groups_menu(event, instance)
-            
-        elif data == "bypass_add_groups":
-            from control.modules.autoforward import handle_bypass_add_groups
-            await handle_bypass_add_groups(event, instance)
-            
-        elif data == "bypass_remove_groups":
-            from control.modules.autoforward import handle_bypass_remove_groups
-            await handle_bypass_remove_groups(event, instance)
-            
-        elif data == "bypass_clear_all":
-            from control.modules.autoforward import handle_bypass_clear_all
-            await handle_bypass_clear_all(event, instance)
-            
-        elif data.startswith("add_bypass_"):
-            from control.modules.autoforward import handle_bypass_group_action
-            group_id = int(data.split("_")[-1])
-            await handle_bypass_group_action(event, instance, "add", group_id)
-            
-        elif data.startswith("remove_bypass_"):
-            from control.modules.autoforward import handle_bypass_group_action
-            group_id = int(data.split("_")[-1])
-            await handle_bypass_group_action(event, instance, "remove", group_id)
-            
-        elif data.startswith("saved_messages_"):
-            page = int(data.split("_")[-1])
-            await show_saved_messages(event, user_id, page)
-            
-        elif data == "autoforward_status":
-            await show_forwarding_status(event, user_id)
-            
-        elif data == "autoforward_start":
-            await start_autoforward(event, instance)
-            
-        elif data == "autoforward_stop":
-            await handle_autoforward_stop(event, instance)
-            
-        elif data == "test_forward_start":
-            await handle_test_forward_start(event, instance)
-            
-        elif data == "test_forward_stop":
-            await handle_test_forward_stop(event, instance)
-            
-        elif data.startswith("select_message_"):
-            message_id = int(data.split("_")[-1])
-            await show_message_preview(event, user_id, message_id)
-            
-        elif data.startswith("confirm_message_"):
-            message_id = int(data.split("_")[-1])
-            message = await instance.client.get_messages('me', ids=message_id)
-            instance.autoforward_config['source_message'] = {
-                'id': message_id,
-                'is_album': bool(message.grouped_id),
-                'album_length': 10
-            }
-            bot_instance._save_instances()
-            await show_autoforward_setup_menu(event, user_id)
-            
-        elif data == "select_delay":
-            await show_delay_config(event, user_id)
-            
-        elif data == "custom_delay":
-            await show_custom_delay_input(event, user_id)
-            
-        elif data.startswith("set_delay_"):
-            delay = int(data.split("_")[-1])
-            instance.autoforward_config['delay'] = delay
-            bot_instance._save_instances()
-            await show_autoforward_setup_menu(event, user_id)
-            
-        elif data == "select_test_group":
-            await show_group_selection(event, user_id)
-            
-        elif data.startswith("select_group_"):
-            group_id = int(data.split("_")[-1])
-            await show_group_preview(event, user_id, group_id)
-            
-        elif data.startswith("confirm_group_"):
-            group_id = int(data.split("_")[-1])
-            instance.autoforward_config['test_group'] = group_id
-            bot_instance._save_instances()
-            await show_autoforward_setup_menu(event, user_id)
-            
-        elif data == "groups":
-            await show_groups_menu(event, user_id)
-            
-        elif data == "tools":
-            await show_tools_menu(event, user_id)
-            
-        elif data == "main":
-            await show_main_menu(event, user_id)
-            
-        elif data == "refresh":
-            await show_main_menu(event, user_id)
-            
-        elif data == "noop":
-            # No operation needed
-            pass
-            
+        if data == "main_menu":
+            await handle_main_menu(event, bot)
+        elif data == "close_menu":
+            await handle_close_menu(event, bot)
+        elif data.startswith("autoforward_"):
+            await handle_autoforward_menu(event, bot, data)
         else:
-            logger.warning(f"Unknown callback data: {data}")
-            await event.respond("❌ Unknown action. Please try again.")
+            logger.warning(f"Unknown callback data from user {user_id}: {data}")
+            msg = await event.respond("⚠️ Invalid menu option.")
+            await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
             
     except Exception as e:
-        logger.error(f"Error handling callback query: {str(e)}", exc_info=True)
-        try:
-            await event.respond(
-                "❌ An error occurred. Please use /start to reconnect.",
-                parse_mode='markdown'
-            )
-        except Exception as e2:
-            logger.error(f"Failed to send error message: {str(e2)}")
+        logger.error(f"Error handling callback {data} for user {user_id}: {str(e)}", exc_info=True)
+        msg = await event.respond("❌ An error occurred. Please try again.")
+        await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
+
+@with_cleanup
+async def handle_main_menu(event, bot):
+    """Handle main menu display"""
+    user_id = event.sender_id
+    instance = bot.user_instances.get(user_id)
+    
+    if not instance:
+        msg = await event.respond("⚠️ No active session found. Please use /start to begin.")
+        await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
+        return
+        
+    buttons = [
+        [Button.inline("📬 Auto-Forward", "autoforward_menu")],
+        [Button.inline("📊 Status", "status"), Button.inline("❓ Help", "help")],
+        [Button.inline("❌ Close Menu", "close_menu")]
+    ]
+    
+    msg = await event.respond(
+        "🔹 Main Menu\n\n"
+        "Select an option from the menu below:",
+        buttons=buttons
+    )
+    await chat_cleaner.track_message(msg, user_id, MessageContext.MENU)
+
+@with_cleanup
+async def handle_close_menu(event, bot):
+    """Handle menu closure"""
+    user_id = event.sender_id
+    await chat_cleaner.clean_chat(user_id)
+    await event.answer("Menu closed")
+
+@with_cleanup
+async def handle_autoforward_menu(event, bot, data):
+    """Handle auto-forward menu options"""
+    user_id = event.sender_id
+    instance = bot.user_instances.get(user_id)
+    
+    if not instance:
+        msg = await event.respond("⚠️ No active session found. Please use /start to begin.")
+        await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
+        return
+        
+    # Extract submenu from data
+    submenu = data.replace("autoforward_", "")
+    
+    if submenu == "menu":
+        buttons = [
+            [Button.inline("⚙️ Setup", "autoforward_setup_menu")],
+            [
+                Button.inline(
+                    "✅ Enable" if not instance.autoforward_enabled else "❌ Disable",
+                    "autoforward_toggle"
+                )
+            ],
+            [Button.inline("📋 Rules", "autoforward_rules")],
+            [Button.inline("🔙 Main Menu", "main_menu")]
+        ]
+        
+        msg = await event.respond(
+            "📬 Auto-Forward Settings\n\n"
+            f"Status: {'✅ Enabled' if instance.autoforward_enabled else '❌ Disabled'}\n"
+            f"Rules: {len(instance.autoforward_config.get('rules', []))}\n\n"
+            "Select an option:",
+            buttons=buttons
+        )
+        await chat_cleaner.track_message(msg, user_id, MessageContext.MENU)
+        
+    elif submenu == "toggle":
+        instance.autoforward_enabled = not instance.autoforward_enabled
+        bot._save_instances()
+        
+        status = "enabled" if instance.autoforward_enabled else "disabled"
+        msg = await event.respond(
+            f"✅ Auto-forward has been {status}.",
+            buttons=[[Button.inline("🔙 Back", "autoforward_menu")]]
+        )
+        await chat_cleaner.track_message(msg, user_id, MessageContext.MENU)
+        
+    else:
+        logger.warning(f"Unknown autoforward submenu: {submenu}")
+        msg = await event.respond(
+            "⚠️ Invalid menu option.",
+            buttons=[[Button.inline("🔙 Main Menu", "main_menu")]]
+        )
+        await chat_cleaner.track_message(msg, user_id, MessageContext.TEMP)
 
 @error_handler
 async def handle_autoforward_stop(event, instance):

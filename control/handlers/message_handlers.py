@@ -7,7 +7,9 @@ from core.session import session_manager
 from control.modules.menu import show_main_menu, clear_chat
 from control.auth import ensure_gateway_auth_initialized
 from utils.chat_cleaner import chat_cleaner, MessageContext
+from utils.decorators import with_cleanup
 
+@with_cleanup
 async def handle_start_command(event, bot_instance):
     """Handle /start command"""
     user_id = event.sender_id
@@ -48,6 +50,7 @@ async def handle_start_command(event, bot_instance):
         logger.error(f"Error handling /start command for user {user_id}: {str(e)}", exc_info=True)
         await event.respond("❌ An error occurred processing your command. Please try again.")
 
+@with_cleanup
 async def handle_help_command(event, bot_instance):
     """Handle /help command"""
     user_id = event.sender_id
@@ -84,6 +87,7 @@ async def handle_help_command(event, bot_instance):
         logger.error(f"Error handling /help command for user {user_id}: {str(e)}", exc_info=True)
         await event.respond("❌ An error occurred processing your command. Please try again.")
 
+@with_cleanup
 async def handle_status_command(event, bot_instance):
     """Handle /status command"""
     user_id = event.sender_id
@@ -139,6 +143,7 @@ async def handle_status_command(event, bot_instance):
         logger.error(f"Error handling /status command for user {user_id}: {str(e)}", exc_info=True)
         await event.respond("❌ An error occurred processing your command. Please try again.")
 
+@with_cleanup
 async def handle_logout_command(event, bot_instance):
     """Handle /logout command"""
     user_id = event.sender_id
