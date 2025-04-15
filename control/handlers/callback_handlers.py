@@ -192,6 +192,7 @@ async def handle_callback_query(event, bot_instance):
             logger.error(f"Failed to send error message: {str(e2)}")
 
 @error_handler
+@with_cleanup
 async def handle_autoforward_stop(event, instance):
     """Handle stopping autoforward"""
     user_id = instance.user_id
@@ -215,6 +216,8 @@ async def handle_autoforward_stop(event, instance):
         logger.error(f"Error stopping autoforward for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred stopping autoforward", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_autoforward_setup(event, bot_instance):
     """Handle autoforward setup callback"""
     user_id = event.sender_id
@@ -253,6 +256,8 @@ async def handle_autoforward_setup(event, bot_instance):
         logger.error(f"Error starting autoforward setup for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred starting setup", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_autoforward_status(event, bot_instance):
     """Handle autoforward status callback"""
     user_id = event.sender_id
@@ -312,6 +317,8 @@ async def handle_autoforward_status(event, bot_instance):
         logger.error(f"Error checking autoforward status for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred checking status", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_test_group_selected(event, bot_instance, data):
     """Handle test group selection callback"""
     user_id = event.sender_id
@@ -345,6 +352,8 @@ async def handle_test_group_selected(event, bot_instance, data):
         logger.error(f"Error handling test group selection for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred selecting test group", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_test_forward_start(event, bot_instance):
     """Handle test forward start callback"""
     user_id = event.sender_id
@@ -378,6 +387,8 @@ async def handle_test_forward_start(event, bot_instance):
         logger.error(f"Error showing test options for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_test_forward_custom_delay(event, bot_instance):
     """Handle custom delay for test forward callback"""
     user_id = event.sender_id
@@ -404,6 +415,8 @@ async def handle_test_forward_custom_delay(event, bot_instance):
         logger.error(f"Error setting up custom delay for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred setting up custom delay", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_message_setup(event, bot_instance, user_id):
     """Handle message selection during setup"""
     try:
@@ -439,6 +452,8 @@ async def handle_message_setup(event, bot_instance, user_id):
         logger.error(f"Error in message setup for user {user_id}: {str(e)}", exc_info=True)
         await event.respond("❌ An error occurred during setup", buttons=[[Button.inline("❌ Cancel", "refresh")]])
 
+@error_handler
+@with_cleanup
 async def handle_delay_setup(event, bot_instance, user_id, delay_text):
     """Handle delay input during setup"""
     try:
@@ -480,6 +495,8 @@ async def handle_delay_setup(event, bot_instance, user_id, delay_text):
         logger.error(f"Error in delay setup for user {user_id}: {str(e)}", exc_info=True)
         await event.respond("❌ An error occurred during setup", buttons=[[Button.inline("❌ Cancel", "refresh")]])
 
+@error_handler
+@with_cleanup
 async def handle_autoforward_confirm(event, bot_instance):
     """Handle autoforward setup confirmation"""
     user_id = event.sender_id
@@ -521,6 +538,8 @@ async def handle_autoforward_confirm(event, bot_instance):
         logger.error(f"Error confirming setup for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred saving configuration", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_test_forward_quick(event, bot_instance):
     """Handle quick test forward"""
     user_id = event.sender_id
@@ -563,6 +582,8 @@ async def handle_test_forward_quick(event, bot_instance):
         logger.error(f"Error in quick test for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred during test", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_test_forward_real(event, bot_instance):
     """Handle real test forward"""
     user_id = event.sender_id
@@ -597,6 +618,8 @@ async def handle_test_forward_real(event, bot_instance):
         logger.error(f"Error in real test for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred scheduling test", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_list_groups(event, bot_instance):
     """Handle listing user's groups and channels"""
     user_id = event.sender_id
@@ -662,6 +685,8 @@ async def handle_list_groups(event, bot_instance):
         logger.error(f"Error listing groups for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred listing groups", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_resync_groups(event, bot_instance):
     """Handle resyncing groups and channels"""
     user_id = event.sender_id
@@ -736,6 +761,8 @@ async def handle_resync_groups(event, bot_instance):
         logger.error(f"Error resyncing groups for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred during resync", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_logout(event, bot_instance):
     """Handle user logout"""
     user_id = event.sender_id
@@ -781,6 +808,8 @@ async def handle_logout(event, bot_instance):
         logger.error(f"Error during logout for user {user_id}: {str(e)}", exc_info=True)
         await event.answer("❌ Error during logout. Please try again.", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_group_finder(event, bot_instance):
     """Handle group finder tool"""
     user_id = event.sender_id
@@ -800,6 +829,8 @@ async def handle_group_finder(event, bot_instance):
         logger.error(f"Error showing group finder: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_account_info(event, bot_instance):
     """Handle account info display"""
     user_id = event.sender_id
@@ -831,6 +862,8 @@ async def handle_account_info(event, bot_instance):
         logger.error(f"Error showing account info: {str(e)}", exc_info=True)
         await event.answer("❌ An error occurred", alert=True)
 
+@error_handler
+@with_cleanup
 async def handle_subscription_info(event, bot_instance):
     """Handle subscription info display"""
     user_id = event.sender_id

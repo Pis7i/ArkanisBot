@@ -225,6 +225,7 @@ async def start_authentication(event, bot_instance):
         logger.error(f"Failed to start authentication for user {user_id}: {str(e)}", exc_info=True)
         await event.respond("❌ An error occurred. Please try again later.")
 
+@with_cleanup
 async def handle_logout(event, bot_instance):
     """Handle user logout while preserving session for future use"""
     user_id = event.sender_id

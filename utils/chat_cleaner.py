@@ -60,27 +60,48 @@ class MessageTracker:
         )
 
 def with_cleanup(func: Callable) -> Callable:
+    """Decorator that automatically cleans old messages before executing a handler.
+    
+    Args:
+        func: The handler function to wrap
+        
+    Returns:
+        Wrapped function that performs cleanup before execution
+    """
     @wraps(func)
-    async def wrapper(message: Message, *args: Any, **kwargs: Any) -> Any:
-        if not hasattr(message, 'from_user') or not message.from_user:
-            return await func(message, *args, **kwargs)
+    async def wrapper(event, *args: Any, **kwargs: Any) -> Any:
+        # Skip cleanup if no user info available
+        if not hasattr(event, 'sender_id'):
+            return await func(event, *args, **kwargs)
             
-        user_id = message.from_user.id
-        cleaner = ChatCleaner()
+        user_id = event.sender_id
+        chat_id = event.chat_id
         
         try:
-            # Load and clean old messages before handling new command
-            await cleaner.clean_chat(user_id)
-            result = await func(message, *args, **kwargs)
+            # Clean old messages before handling new command
+            await chat_cleaner.clean_messages(
+                event.client,
+                user_id,
+                chat_id,
+                context_filter={MessageContext.MENU, MessageContext.COMMAND, MessageContext.TEMP}
+            )
             
-            # Track the new message for future cleanup
-            if isinstance(result, Message):
-                await cleaner.track_message(result, MessageContext.MENU)
+            # Execute handler
+            result = await func(event, *args, **kwargs)
+            
+            # Track the response message if it's a Message object
+            if hasattr(result, 'id'):
+                await chat_cleaner.track_message(
+                    user_id,
+                    result,
+                    MessageContext.MENU
+                )
             return result
             
         except Exception as e:
-            logger.error(f"Error in cleanup wrapper: {str(e)}")
-            return await func(message, *args, **kwargs)
+            logger.error(f"Error in cleanup wrapper for user {user_id}: {str(e)}")
+            # Continue with original handler if cleanup fails
+            return await func(event, *args, **kwargs)
             
     return wrapper
 
